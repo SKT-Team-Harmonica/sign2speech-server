@@ -44,7 +44,3 @@ async def generate_sentence(input_data: InputData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/key")
-async def get_key():
-    return openai.api_key
-
