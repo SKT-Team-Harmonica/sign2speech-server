@@ -8,7 +8,10 @@ import torch
 from torchvision.io import read_video
 
 router = APIRouter()
-img_dir = "/Users/bes/PycharmProjects/sign2speech_fastapi/app/img_dir"
+
+# 상대 경로로 img_dir 설정 (애플리케이션 루트 기준)
+img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img_dir")
+
 def extract_frames_jpg(video_file: UploadFile, output_folder: str = img_dir) -> List[str]:
     # output_folder가 존재하지 않으면 생성
     if not os.path.exists(output_folder):
@@ -42,7 +45,7 @@ def extract_frames_tensor(video_file: UploadFile, output_folder: str = img_dir) 
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-        # 비디오 파일을 읽어 들입니다.
+    # 비디오 파일을 읽어 들입니다.
     video_path = os.path.join(output_folder, video_file.filename)
 
     with open(video_path, "wb") as f:
