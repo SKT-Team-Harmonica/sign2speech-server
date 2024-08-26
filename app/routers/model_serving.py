@@ -17,13 +17,14 @@ router = APIRouter()
 # 상대 경로로 img_dir 설정 (애플리케이션 루트 기준)
 img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img_dir")
 
-def call_chatgpt_api(strings: List[str]) -> str:
-    combined_string = " ".join(strings)
+def call_chatgpt_api(input_string: str) -> str:
+    #combined_string = " ".join(input_string)
 
-    prompt = f"각 글로스들을 줄테니, 완성된 하나의 문장으로 만들어줘. 다른 부가적인 설명 문장 없이 한글 존댓말로: {combined_string}"
+    prompt = (f"주어진 단어들을 하나의 완성된 문장으로 만들어줘, "
+              f"다른 부가적인 설명 생성하지 말고, 한글 존댓말로: {input_string}")
 
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4o-mini",
         messages=[
             {"role": "user", "content": prompt}
         ],
