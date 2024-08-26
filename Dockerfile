@@ -12,9 +12,9 @@ WORKDIR /app
 # 로컬의 requirements.txt 파일을 컨테이너로 복사
 COPY requirements.txt .
 
-# 필요한 패키지 설치
+# 문제 해결을 위해 pip 업그레이드 후 --use-deprecated=legacy-resolver 플래그 사용
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --use-deprecated=legacy-resolver --no-cache-dir -r requirements.txt
 
 # 모든 파일을 작업 디렉토리로 복사
 COPY . .

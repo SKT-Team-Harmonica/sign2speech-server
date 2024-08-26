@@ -15,17 +15,17 @@ router = APIRouter()
 
 app = FastAPI()
 
+# 단일 문자열 입력을 위한 데이터 모델
 class InputData(BaseModel):
-    strings: list[str]
+    string: str
 
-@router.post("/generate-sentence/")
+@router.post("/translate")
 async def generate_sentence(input_data: InputData):
     try:
-        # 리스트의 문자열을 하나의 문자열로 결합
-        combined_string = " ".join(input_data.strings)
+        combined_string = input_data.string
 
         # ChatGPT에게 전달할 프롬프트
-        prompt = f"각 글로스들을 줄테니, 완성된 하나의 문장으로 만들어줘. 다른 부가적인 설명 문장 없이 한글 존댓말로: {combined_string}"
+        prompt = f"언어를 감지해서 한국어 문장으로 만들어줘. 다른 부가 설명 필요없이 번역된 문장만 출력.: {combined_string}"
 
         # ChatGPT API 호출
         response = openai.ChatCompletion.create(
@@ -43,4 +43,3 @@ async def generate_sentence(input_data: InputData):
         return {"generated_sentence": generated_text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-

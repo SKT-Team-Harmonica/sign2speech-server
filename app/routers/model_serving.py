@@ -1,77 +1,99 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from app.schemas.model_schema import InputData, PredictionResult
-from app.services.model_service import predict
+# app/routers/model_serving.py
 import os
 import cv2
+from fastapi import APIRouter, UploadFile, File, HTTPException
 from typing import List
-import torch
-from torchvision.io import read_video
+from dotenv import load_dotenv
+import openai
+from app.schemas.model_schema import PredictionResult
+from app.services.model_service import predict
+
+load_dotenv()
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 router = APIRouter()
 
 # 상대 경로로 img_dir 설정 (애플리케이션 루트 기준)
 img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img_dir")
 
+def call_chatgpt_api(strings: List[str]) -> str:
+    combined_string = " ".join(strings)
+
+    prompt = f"각 글로스들을 줄테니, 완성된 하나의 문장으로 만들어줘. 다른 부가적인 설명 문장 없이 한글 존댓말로: {combined_string}"
+
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=100,
+        temperature=0.7
+    )
+
+    generated_text = response.choices[0].message['content'].strip()
+    return generated_text
+
 def extract_frames_jpg(video_file: UploadFile, output_folder: str = img_dir) -> List[str]:
     # output_folder가 존재하지 않으면 생성
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    # 비디오 파일을 읽어 들입니다.
+    # 비디오 파일을 저장합니다.
     video_path = os.path.join(output_folder, video_file.filename)
 
+    # 업로드된 파일을 읽고 저장합니다.
     with open(video_path, "wb") as f:
         f.write(video_file.file.read())
 
     cap = cv2.VideoCapture(video_path)
     frames = []
     count = 0
+
     while True:
         success, frame = cap.read()
         if not success:
             break
 
-        # 프레임을 .jpg로 저장
+        # 프레임을 224x224 크기로 리사이즈
+        resized_frame = cv2.resize(frame, (224, 224), interpolation=cv2.INTER_LINEAR)
+
+        # 리사이즈된 프레임을 .jpg로 저장
         frame_filename = os.path.join(output_folder, f"frame_{count}.jpg")
-        cv2.imwrite(frame_filename, frame)
+        cv2.imwrite(frame_filename, resized_frame)
         frames.append(frame_filename)
         count += 1
 
     cap.release()
-    return frames
 
-def extract_frames_tensor(video_file: UploadFile, output_folder: str = img_dir) -> torch.Tensor:
-    # output_folder가 존재하지 않으면 생성
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-
-    # 비디오 파일을 읽어 들입니다.
-    video_path = os.path.join(output_folder, video_file.filename)
-
-    with open(video_path, "wb") as f:
-        f.write(video_file.file.read())
-
-    # torchvision.io.read_video를 사용하여 비디오를 읽고 프레임을 Tensor로 반환
-    video_frames, _, _ = read_video(video_path, pts_unit='sec')
-
-    # 데이터 타입을 명시적으로 변환 (float32)
-    video_frames = video_frames.float() / 255.0  # uint8을 float32로 변환하며 [0, 1] 범위로 스케일링
-
-    # 비디오 파일 삭제 (선택적)
     os.remove(video_path)
 
-    return video_frames
+    return frames
 
 @router.post("/predict", response_model=PredictionResult)
 def get_prediction(video: UploadFile = File(...)):
-    # InputData 객체를 생성
-    input_data = InputData(video=video)
+    try:
+        # 비디오에서 프레임 추출
+        frame_files = extract_frames_jpg(video)
 
-    # 예측 수행
-    prediction_result = predict(input_data)
+        # 모델에 프레임 파일 경로 리스트 전달하여 예측 수행
+        prediction_result = predict(frame_files)
+        print(prediction_result)
 
-    # 예측 결과 반환
-    return prediction_result
+        # .jpg 파일들 정리
+        for frame_file in frame_files:
+            if os.path.exists(frame_file):
+                os.remove(frame_file)
+
+        # 예측 결과를 ChatGPT API에 전달하여 문장 생성
+        generated_sentence = call_chatgpt_api([prediction_result])
+
+        return {"prediction": generated_sentence}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @router.post("/test-extract-frames/")
 async def test_extract_frames(video: UploadFile = File(...)):
@@ -93,17 +115,4 @@ async def test_extract_frames(video: UploadFile = File(...)):
         video_path = os.path.join(img_dir, video.filename)
         if os.path.exists(video_path):
             os.remove(video_path)
-
-@router.post("/test-extract-frames-tensor/")
-async def test_extract_frames(video: UploadFile = File(...)):
-    try:
-        # extract_frames 함수에서 img_dir을 사용
-        video_tensor = extract_frames_tensor(video)
-
-        # Tensor의 크기를 반환 (예: 프레임 수, 높이, 너비, 채널 수)
-        return {"video_tensor_shape": video_tensor.shape}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
