@@ -11,6 +11,8 @@ from collections import Counter, defaultdict
 from typing import Callable, List, NoReturn, Optional, Tuple, Dict, Union
 from app.models.sign_model import SignModel, load_model
 from app.services.transformer import Resize, ToTensorGen  # 필요한 변환 클래스를 임포트
+from itertools import groupby
+import tensorflow as tf
 
 # 프로젝트 최상위 경로를 동적으로 설정
 app_root = os.path.dirname(os.path.abspath(__file__))
@@ -323,10 +325,43 @@ def predict(frame_files: List[str]) -> str:
 
     try:
         with torch.no_grad():
+            # 모델 예측 수행
             outputs = model(frames_tensor)
-        outputs = outputs.mean(dim=1)
-        _, predicted = torch.max(outputs, 1)
-        return vocab.itos[predicted.item()]
+
+            # CTC 디코딩을 위한 전처리 (softmax 또는 log_softmax와 비슷한 처리)
+            gloss_probs = outputs.log_softmax(2).permute(1, 0, 2)  # (T, B, C)
+            gloss_probs = gloss_probs.detach().numpy()  # (T, B, C)
+            gloss_probs_tf = np.concatenate(
+                # (C: 1~)
+                (gloss_probs[:, :, 1:], gloss_probs[:, :, 0, None]),
+                axis=-1,
+            )
+
+            sequence_length = np.array([frames_tensor.shape[1]]) // 4
+            ctc_decode, _ = tf.nn.ctc_beam_search_decoder(
+                inputs=gloss_probs_tf,
+                sequence_length=sequence_length,
+                beam_width=1,
+                top_paths=1,
+            )
+            ctc_decode = ctc_decode[0]
+
+            # 디코딩된 결과 생성
+            decoded_gloss_sequences = []
+            tmp_gloss_sequences = [[] for _ in range(outputs.shape[0])]
+            for (value_idx, dense_idx) in enumerate(ctc_decode.indices):
+                tmp_gloss_sequences[dense_idx[0]].append(ctc_decode.values[value_idx].numpy() + 1)
+            for seq_idx in range(0, len(tmp_gloss_sequences)):
+                decoded_gloss_sequences.append(
+                    [x[0] for x in groupby(tmp_gloss_sequences[seq_idx])]
+                )
+
+            decoded = vocab.arrays_to_sentences(arrays=decoded_gloss_sequences)
+
+            if len(decoded) > 0:
+                return " ".join(decoded[0])
+            else:
+                return "No prediction available"
     except Exception as e:
         print(f"Error during model prediction: {e}")
         raise ValueError("Model prediction failed.")
