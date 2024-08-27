@@ -1,12 +1,14 @@
 # app/routers/model_serving.py
 import os
 import cv2
+import numpy as np
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from typing import List
+from typing import List, Tuple
 from dotenv import load_dotenv
 import openai
 from app.schemas.model_schema import PredictionResult
 from app.services.model_service import predict
+from app.services.transformer import Resize, CenterCrop, ToTensorGen
 
 load_dotenv()
 
@@ -51,17 +53,27 @@ def extract_frames_jpg(video_file: UploadFile, output_folder: str = img_dir) -> 
     frames = []
     count = 0
 
+    def center_crop(img: np.ndarray, crop_size: Tuple[int, int]) -> np.ndarray:
+        h, w, _ = img.shape
+        crop_h, crop_w = crop_size
+        start_x = (w - crop_w) // 2
+        start_y = (h - crop_h) // 2
+        return img[start_y:start_y + crop_h, start_x:start_x + crop_w]
+
     while True:
         success, frame = cap.read()
         if not success:
             break
 
-        # 프레임을 224x224 크기로 리사이즈
-        resized_frame = cv2.resize(frame, (224, 224), interpolation=cv2.INTER_LINEAR)
+        # 프레임을 256x256 크기로 리사이즈
+        resized_frame = cv2.resize(frame, (256, 256), interpolation=cv2.INTER_LINEAR)
 
-        # 리사이즈된 프레임을 .jpg로 저장
+        # 256x256 프레임을 중앙에서 224x224로 크롭
+        cropped_frame = center_crop(resized_frame, (224, 224))
+
+        # 크롭된 프레임을 .jpg로 저장
         frame_filename = os.path.join(output_folder, f"frame_{count}.jpg")
-        cv2.imwrite(frame_filename, resized_frame)
+        cv2.imwrite(frame_filename, cropped_frame)
         frames.append(frame_filename)
         count += 1
 
@@ -70,7 +82,6 @@ def extract_frames_jpg(video_file: UploadFile, output_folder: str = img_dir) -> 
     os.remove(video_path)
 
     return frames
-
 @router.post("/predict", response_model=PredictionResult)
 def get_prediction(video: UploadFile = File(...)):
     try:
@@ -108,12 +119,12 @@ async def test_extract_frames(video: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    finally:
-        # 정리: 저장된 프레임 파일 삭제
-        for file_path in frame_files:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        video_path = os.path.join(img_dir, video.filename)
-        if os.path.exists(video_path):
-            os.remove(video_path)
+    # finally:
+    #     # 정리: 저장된 프레임 파일 삭제
+    #     for file_path in frame_files:
+    #         if os.path.exists(file_path):
+    #             os.remove(file_path)
+    #     video_path = os.path.join(img_dir, video.filename)
+    #     if os.path.exists(video_path):
+    #         os.remove(video_path)
 
